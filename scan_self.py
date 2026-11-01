@@ -80,19 +80,38 @@ What's the ONE change you'd make first?
 Be direct. Use plain ASCII. No emojis. Markdown headers OK."""
 
 
-def navigate_to_self_view() -> None:
-    """Discover -> self-pfp -> avatar -> View tab. Assumes Hinge is
-    open on Discover when called."""
+def navigate_to_self_view(*, verify: bool = True) -> None:
+    """Discover -> bottom-right Profile tab -> avatar -> View tab."""
     c = config.COORDS
-    adb.tap(*c["nav_self_pfp"])
+    print("[nav] Tap bottom-right Profile icon…")
+    adb.tap_nav_profile()
     adb.jitter_sleep("after_tap")
-    time.sleep(1.0)
+    time.sleep(1.2)
+    print("[nav] Tap your avatar…")
     adb.tap(*c["self_avatar"])
     adb.jitter_sleep("after_tap")
-    time.sleep(1.0)
+    time.sleep(1.2)
+    print("[nav] Tap View tab…")
     adb.tap(*c["view_tab"])
     adb.jitter_sleep("after_tap")
-    time.sleep(1.0)
+    time.sleep(1.2)
+
+    if verify:
+        config.DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        check = config.DEBUG_DIR / "self_nav_verify.png"
+        check.write_bytes(adb.screenshot())
+        print(f"[nav] Verification screenshot: {check}")
+        print("[nav] You should see YOUR profile View tab (as others see it).")
+        try:
+            ans = input("[nav] Is this YOUR profile (not a Discover match)? [y/n]: ").strip().lower()
+        except EOFError:
+            ans = "y"
+        if ans not in ("y", "yes", ""):
+            raise RuntimeError(
+                "Navigation looks wrong — coords may need calibration. "
+                "Open self_nav_verify.png, run `python calibrate.py`, "
+                "and update config._COORDS_REF (or COORDS after scale)."
+            )
 
 
 def scroll_to_top(swipes: int = 8) -> None:
@@ -102,17 +121,11 @@ def scroll_to_top(swipes: int = 8) -> None:
         adb.jitter_sleep("after_scroll")
 
 
-def capture_self_frames(n_frames: int = DEFAULT_FRAMES) -> list[bytes]:
+def capture_self_frames(n_frames: int | None = None) -> list[bytes]:
     """Top-to-bottom scroll capture of the View tab."""
-    scroll_to_top()
-    frames = [adb.screenshot()]
-    adb.jitter_sleep("after_screenshot")
-    for _ in range(n_frames - 1):
-        adb.scroll_down()
-        adb.jitter_sleep("after_scroll")
-        frames.append(adb.screenshot())
-        adb.jitter_sleep("after_screenshot")
-    return frames
+    from wingman.capture import capture_self_profile
+
+    return capture_self_profile(n_frames)
 
 
 def return_to_discover() -> None:

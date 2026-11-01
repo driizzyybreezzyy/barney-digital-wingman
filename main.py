@@ -74,6 +74,52 @@ def scroll_back_to_top(swipes: int | None = None) -> None:
         adb.jitter_sleep("after_scroll")
 
 
+def _run_mode_label() -> str:
+    mode = getattr(config, "RUN_MODE", "automated").lower()
+    labels = {
+        "dry_run": "DRY RUN (capture + judge, no taps)",
+        "wingman": "WINGMAN (approval required)",
+        "assisted": "ASSISTED (approval, then bot acts)",
+        "automated": "AUTOMATED",
+    }
+    if mode not in labels:
+        raise ValueError(
+            f"Unknown RUN_MODE={mode!r}. Use dry_run, wingman, assisted, or automated."
+        )
+    suffix = ""
+    if mode == "automated" and config.DRY_RUN:
+        suffix = " + legacy DRY_RUN (force-skip likes)"
+    elif mode == "automated" and not config.DRY_RUN:
+        suffix = " + LIVE (will tap)"
+    return labels[mode] + suffix
+
+
+def _should_perform_actions() -> bool:
+    """Whether this run mode may tap Skip / Like on Hinge."""
+    mode = getattr(config, "RUN_MODE", "automated").lower()
+    if mode == "dry_run":
+        return False
+    if mode == "wingman":
+        return False  # Phase 2 adds approval + manual send
+    if mode == "assisted":
+        return bool(getattr(config, "AUTO_ACTION", False))
+    if mode == "automated":
+        return True
+    raise ValueError(f"Unknown RUN_MODE={mode!r}")
+
+
+def _wait_for_manual_advance() -> bool:
+    """Pause between dry-run profiles. Returns False if user wants to quit."""
+    try:
+        answer = input(
+            "\n[dry-run] Advance to the next profile in the emulator, "
+            "then press Enter (or q to quit): "
+        ).strip().lower()
+    except EOFError:
+        return False
+    return answer not in ("q", "quit", "exit")
+
+
 def do_skip() -> None:
     """Tap the X to advance to the next profile. Always taps (even in dry run);
     advancing is needed for the loop to see new profiles."""
@@ -82,71 +128,117 @@ def do_skip() -> None:
     adb.jitter_sleep("after_skip")
 
 
-def do_like(message: str = "") -> None:
-    """In live mode: scroll to top, tap heart, type message (if any), tap Send Like.
-    In dry run: advance by skipping (so we never send an actual like).
+def _resolve_heart_tap() -> tuple[int, int]:
+    """Find photo-1 heart: vision first, calibrated COORDS fallback."""
+    if getattr(config, "PROFILE_AT_TOP_AFTER_CAPTURE", False):
+        scroll_back_to_top(swipes=4)
+        config.PROFILE_AT_TOP_AFTER_CAPTURE = False
+    else:
+        scroll_back_to_top()
+    for attempt in range(3):
+        heart_xy = vision.find_first_heart(adb.screenshot())
+        if heart_xy is not None:
+            print(f"  [like] heart found at {heart_xy}")
+            return heart_xy
+        if attempt < 2:
+            print(f"  [like] heart not found — scroll to top retry {attempt + 2}/3")
+            scroll_back_to_top(swipes=8)
+    fallback = config.COORDS.get("heart_photo_1")
+    if fallback:
+        print("  WARN: vision heart miss — tapping calibrated heart_photo_1 COORDS")
+        return int(fallback[0]), int(fallback[1])
+    debug_path = config.DEBUG_DIR / "assist_send_heart_miss.png"
+    debug_path.parent.mkdir(parents=True, exist_ok=True)
+    debug_path.write_bytes(adb.screenshot())
+    raise RuntimeError(
+        f"vision: couldn't find photo-1 heart after scroll-back "
+        f"(screenshot saved: {debug_path}). "
+        "Run: .venv/bin/python calibrate.py — then update config COORDS for your phone."
+    )
 
-    Send Like / comment input positions are found at tap-time via vision —
-    the compose card anchors to whichever heart was tapped and shifts per
-    profile, so static COORDS don't survive across profiles.
-    """
+
+def _wait_for_compose(timeout_s: float = 10.0) -> tuple[int, int] | None:
+    """Wait for Send Like button after heart tap (= compose card open)."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        png = adb.screenshot()
+        xy = vision.find_send_like(png)
+        if xy is not None:
+            return xy
+        if vision.find_comment_field(png) is not None:
+            fallback = config.COORDS.get("send_like_button")
+            if fallback:
+                return (int(fallback[0]), int(fallback[1]))
+        time.sleep(0.7)
+    return None
+
+
+def _open_compose(heart_xy: tuple[int, int]) -> tuple[int, int]:
+    """Tap heart until Add a comment / Send Like appears."""
+    for attempt in range(3):
+        adb.tap(*heart_xy)
+        adb.jitter_sleep("after_tap")
+        send_xy = _wait_for_compose()
+        if send_xy is not None:
+            print(f"  [like] compose open — Send Like at {send_xy}")
+            return send_xy
+        if attempt < 2:
+            print(f"  [like] compose not open — heart retry {attempt + 2}/3")
+    debug_path = config.DEBUG_DIR / "assist_send_compose_miss.png"
+    debug_path.parent.mkdir(parents=True, exist_ok=True)
+    debug_path.write_bytes(adb.screenshot())
+    raise RuntimeError(
+        f"compose card did not open after heart taps (saved {debug_path}). "
+        "Phone must show this profile at photo 1. Paste comment manually."
+    )
+
+
+def do_like(message: str = "") -> dict:
+    """Tap heart, type message, send like. Returns {verified, warnings}."""
     if config.DRY_RUN:
         do_skip()
-        return
-    # Scroll back to the top before tapping a heart. The compose box
-    # anchors to the tapped element and extends DOWNWARD — if we tap
-    # a heart that's already low on screen (which it is after capture),
-    # Send Like ends up off-screen and undetectable. Worth the ~14s.
-    scroll_back_to_top()
-    heart_xy = vision.find_first_heart(adb.screenshot())
-    if heart_xy is None:
-        # Static fallback used to fire here, but it silently misses on
-        # profiles where the heart's real position differs from the
-        # calibrated coord (different layouts, partial scroll-back). The
-        # loop would then type/tap into the void and never advance,
-        # producing an infinite-loop on the same profile. Bail to skip
-        # instead so the profile advances and the loop survives.
-        raise RuntimeError("vision: couldn't find photo-1 heart after scroll-back")
-    adb.tap(*heart_xy)
-    adb.jitter_sleep("after_tap")
+        return {"verified": False, "warnings": ["dry_run skip"]}
 
-    send_xy = vision.find_send_like(adb.screenshot())
-    if send_xy is None:
-        # Same reasoning as the heart fallback above — silent fallback
-        # masks a real failure and traps the loop. Skip instead.
-        raise RuntimeError("vision: couldn't find Send Like after heart tap")
-    comment_xy = vision.find_comment_input(send_xy)
+    warnings: list[str] = []
+    heart_xy = _resolve_heart_tap()
+    send_xy = _open_compose(heart_xy)
+
+    png = adb.screenshot()
+    comment_xy = vision.find_comment_field(png) or vision.find_comment_input(send_xy)
+    text_verified = not bool(message.strip())
 
     if message:
         adb.tap(*comment_xy)
         adb.jitter_sleep("after_tap")
-        # Snapshot empty-field text-pixel baseline so we can detect when
-        # the typed text has actually landed in the EditText buffer.
         empty_pixels = vision.comment_field_text_pixels(adb.screenshot(), send_xy)
         adb.input_text(message)
-        # Poll for the field to fill. Under host CPU contention (e.g. a
-        # game running alongside the emulator) `input text` events can
-        # dispatch slower than expected — short fixed waits drop chars.
-        # Expected pixel count grows with message length; require we see
-        # well above the empty baseline before sending.
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 18
         target_pixels = empty_pixels + max(150, 20 * len(message))
+        current = empty_pixels
         while time.monotonic() < deadline:
-            time.sleep(1.0)
+            time.sleep(0.8)
             current = vision.comment_field_text_pixels(adb.screenshot(), send_xy)
-            if current >= target_pixels:
+            if current >= target_pixels * 0.92:
+                text_verified = True
                 break
         else:
-            print(f"WARN: typed text didn't reach expected pixel density "
-                  f"(have {current}, want {target_pixels}) — sending anyway.")
-        # Typed text can wrap to multiple lines, expanding the comment
-        # field and pushing Send Like down. Re-find against the post-type
-        # screen so the tap lands on the actual button position.
+            warnings.append(
+                f"comment may not have typed (pixels {current}/{target_pixels})"
+            )
+            print(f"  WARN: {warnings[-1]}")
         post_type_xy = vision.find_send_like(adb.screenshot())
         if post_type_xy is not None:
             send_xy = post_type_xy
     adb.tap(*send_xy)
     adb.jitter_sleep("after_like_sent")
+
+    verified = text_verified
+    if not verified:
+        debug_path = config.DEBUG_DIR / "assist_send_after_tap.png"
+        debug_path.parent.mkdir(parents=True, exist_ok=True)
+        debug_path.write_bytes(adb.screenshot())
+        warnings.append(f"check phone manually (debug {debug_path})")
+    return {"verified": verified, "warnings": warnings}
 
 
 def save_debug(frames: list[bytes], decision, profile_idx: int) -> None:
@@ -205,6 +297,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "advance to the next city in the rotation. Loops back to "
              "start when exhausted.",
     )
+    p.add_argument(
+        "--run-mode",
+        default=None,
+        choices=("dry_run", "wingman", "assisted", "automated"),
+        help="Override config.RUN_MODE for this run.",
+    )
     return p.parse_args(argv)
 
 
@@ -215,6 +313,8 @@ def main() -> int:
     if args.mode:
         config.ACTIVE_MODE = args.mode
         config._apply_mode()
+    if args.run_mode:
+        config.RUN_MODE = args.run_mode
 
     serial = adb.check_device()
     print(f"Connected to: {serial}")
@@ -224,7 +324,9 @@ def main() -> int:
         else "no age gate"
     )
     print(f"Mode:     {config.MODE_NAME} ({age_band})")
-    print(f"Run:      {'DRY RUN (no taps)' if config.DRY_RUN else 'LIVE (will tap)'}")
+    print(f"Run:      {_run_mode_label()}")
+    if getattr(config, "HUMAN_APPROVAL", False):
+        print("Approval: HUMAN_APPROVAL enabled")
     print(f"Max likes: {config.MAX_LIKES_PER_SESSION}, "
           f"max profiles: {config.MAX_PROFILES_PER_SESSION}")
 
@@ -311,12 +413,19 @@ def main() -> int:
         if frame0_hash == last_frame0_hash:
             duplicate_streak += 1
             print(f"DUPLICATE: frame 0 matches previous profile "
-                  f"(streak {duplicate_streak}). Force-skipping without judge.")
-            try:
-                do_skip()
-            except Exception as e:
-                print(f"Skip failed during duplicate recovery: {e!r}")
-            time.sleep(min(2 + duplicate_streak * 2, 15))
+                  f"(streak {duplicate_streak}).")
+            if _should_perform_actions():
+                print("Force-skipping without judge.")
+                try:
+                    do_skip()
+                except Exception as e:
+                    print(f"Skip failed during duplicate recovery: {e!r}")
+                time.sleep(min(2 + duplicate_streak * 2, 15))
+            else:
+                print("[dry-run] Still on the same profile — advance manually "
+                      "in the emulator.")
+                if not _wait_for_manual_advance():
+                    break
             continue
         last_frame0_hash = frame0_hash
         duplicate_streak = 0
@@ -354,7 +463,10 @@ def main() -> int:
         t_judge = time.monotonic() - t1
         if decision is None:
             print("Judge failed 3 times — skipping this profile to keep the loop alive.")
-            do_skip()
+            if _should_perform_actions():
+                do_skip()
+            elif not _wait_for_manual_advance():
+                break
             continue
 
         print(f"Name:     {decision.name}")
@@ -366,7 +478,11 @@ def main() -> int:
         save_debug(frames, decision, profiles_seen)
 
         t2 = time.monotonic()
-        if decision.decision == "like":
+        if not _should_perform_actions():
+            print("[dry-run] No Hinge action taken.")
+            if config.RUN_MODE == "dry_run" and not _wait_for_manual_advance():
+                break
+        elif decision.decision == "like":
             if likes_sent >= config.MAX_LIKES_PER_SESSION:
                 print(f"Hit max likes cap ({config.MAX_LIKES_PER_SESSION}). Stopping.")
                 break

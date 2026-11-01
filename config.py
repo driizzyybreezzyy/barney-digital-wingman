@@ -26,20 +26,33 @@ MESSAGE_VOICE: str | None = None
 MODE_NAME: str = ""
 PREMADES: list[dict] = []
 
-# ---------- Run mode ----------
-# DRY_RUN = False -> actually like / send messages (default)
-# DRY_RUN = True  -> decide and log, but force-skip every profile
-#                    instead of liking. Every "would-like" profile gets
-#                    skipped (gone from your queue) but no likes are
-#                    spent.
-#
-# When to flip this to True:
-#   - Free Hinge (8 likes/day): YES, for your first run or two. Lets
-#     you watch decisions without spending your daily cap on a rubric
-#     you haven't tuned. Once decisions look right, flip back to False.
-#   - Hinge+ (unlimited likes): NO. Just run small live batches
-#     (MAX_LIKES_PER_SESSION = 5) and Ctrl-C if something looks off.
-DRY_RUN = False
+# ---------- Digital Wingman run modes (see DIGITAL_WINGMAN.md §27) ----------
+#   dry_run    — capture + judge only; no taps on Hinge (Mode 0)
+#   wingman    — judge + human approval; user sends action (Mode 1)
+#   assisted   — judge + approval, then bot performs tap (Mode 2)
+#   automated  — full auto loop (Mode 3; disabled by default)
+RUN_MODE = "dry_run"
+
+# Human-in-the-loop defaults (Digital Wingman experiment).
+HUMAN_APPROVAL = True
+AUTO_ACTION = False
+
+# When automating likes: prefer profiles showing "Active now" on Hinge.
+# In assisted/automated mode, inactive profiles are deferred unless LIKE ≥9/10
+# or 3+ tier-1 hooks — saves free daily likes for better reply odds.
+PREFER_ACTIVE_NOW = True
+
+# Prefer LLM openers (varied voice). Fallbacks only when generation fails.
+OPENER_FALLBACK_FIRST = False
+
+# Automated likes: skip thin (1 prompt) profiles unless Active now.
+AUTOMATE_REQUIRE_ACTIVE_NOW = True
+
+# Legacy hinge-auto flag. Still honored when RUN_MODE == "automated":
+#   DRY_RUN = False -> actually like / send messages
+#   DRY_RUN = True  -> decide and log, but force-skip every profile
+#                       instead of liking (profile leaves queue; no like spent).
+DRY_RUN = True
 
 # Default = 8, which matches free-tier Hinge's daily like cap (resets at
 # 4am local). One session per day exhausts the free allotment cleanly.
@@ -51,33 +64,35 @@ DRY_RUN = False
 MAX_LIKES_PER_SESSION = 8
 MAX_PROFILES_PER_SESSION = 100
 
-# ---------- Emulator settings ----------
-# Pixel 10 (and recent Pixel models) are 1080x2424. Change if you're using
-# a different emulator profile — and re-run calibrate.py after any change.
-SCREEN_WIDTH = 1080
-SCREEN_HEIGHT = 2424
+# ---------- Device / screen ----------
+# Leave unset to auto-detect a single connected emulator/device. Set this
+# locally when multiple ADB devices are connected.
+ADB_SERIAL = None
+SCREEN_WIDTH = 1240
+SCREEN_HEIGHT = 2772
 
-# Number of scroll-and-screenshot passes per profile.
-# Longer profiles (6 photos + 3 prompts) need ~7 frames at the scroll step
-# below. Duplicate end frames on shorter profiles are harmless.
-FRAMES_PER_PROFILE = 7
+# Keep capture bounded. The capture loop stops earlier when consecutive
+# screenshots are visually unchanged.
+FRAMES_PER_PROFILE = 6
+SELF_PROFILE_MAX_FRAMES = 8
+DISCOVER_PROFILE_MAX_FRAMES = 8
 
-# ---------- Coordinates ----------
-# Pixel 10 emulator defaults (1080x2424). These values are
-# accurate for the standard Pixel 10 AVD; if your screen is the same
-# resolution and Hinge's layout hasn't shifted, they'll work as-is. If
-# anything is off, run `python calibrate.py` to capture a screenshot and
-# update the values that don't match.
-COORDS = {
+# Human-like scroll jitter (reduces fixed-gesture bot pattern).
+HUMAN_SCROLL = True
+
+# Set True after post-capture scroll-to-top so do_like skips the long scroll sweep.
+PROFILE_AT_TOP_AFTER_CAPTURE = False
+
+# ---------- Coordinates (reference: Pixel 10 @ 1080x2424, auto-scaled) ----------
+_COORDS_REF = {
     # Skip / like action targets (Discover screen, photo 1 at top)
-    "skip_button":       (134, 2068),   # X icon on prompt/photo card
-    "heart_photo_1":     (938, 1421),   # Heart icon on photo 1
+    # Calibrated OnePlus 11R @ 1240x2772 (2026-09-02, profile S).
+    "skip_button":       (368, 1424),   # X icon on prompt card
+    "heart_photo_1":     (935, 1418),   # Heart icon on photo 1
 
-    # Compose box (anchors to the element whose heart was tapped; these
-    # values are mostly fallbacks — vision.py re-finds them at tap-time
-    # because the box shifts per profile).
-    "send_like_button":  (687, 1488),
-    "comment_input":     (540, 1317),
+    # Compose box fallbacks (vision re-finds at tap-time when possible).
+    "send_like_button":  (711, 1359),
+    "comment_input":     (470, 1209),
     "compose_close":     (960, 200),
 
     # Scroll gesture (swipe up = scroll down through profile).
@@ -105,6 +120,10 @@ COORDS = {
     "age_chip":          (460, 225),    # opens Age filter sheet
 }
 
+from coords_util import scale_coords  # noqa: E402
+
+COORDS = scale_coords(_COORDS_REF, SCREEN_WIDTH, SCREEN_HEIGHT)
+
 # ---------- Timing ----------
 # Random delay between actions (seconds, min/max for jitter).
 DELAYS = {
@@ -119,7 +138,12 @@ DELAYS = {
 # "anthropic" -> uses your ANTHROPIC_API_KEY; best quality, ~$0.02-0.05/profile.
 # "ollama"    -> uses Ollama Cloud (free tier) or local Ollama; lower quality
 #                but no per-token cost.
-JUDGE_BACKEND = "anthropic"
+# "gemini"    -> uses Google Gemini API; free tier up to 15 RPM, very fast.
+JUDGE_BACKEND = "gemini"
+
+# ---------- Gemini settings (when JUDGE_BACKEND == "gemini") ----------
+# Requires GEMINI_API_KEY in your environment or .env file.
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # ---------- Anthropic settings (when JUDGE_BACKEND == "anthropic") ----------
 # Sonnet is the default — cheaper than Opus and plenty capable for this task.
@@ -133,15 +157,22 @@ EFFORT = "medium"  # low | medium | high
 #   "qwen2.5-vl"        — strong all-around vision model (recommended)
 #   "qwen2.5-vl:7b"     — smaller, faster, weaker
 #   "llama3.2-vision"   — alternative; tool-calling can be flakier
-OLLAMA_MODEL = "qwen2.5-vl"
+OLLAMA_MODEL = "qwen2.5vl:3b"
 
 # OLLAMA_HOST: None or "" -> default http://localhost:11434
 #              "https://ollama.com" -> Ollama Cloud (requires OLLAMA_API_KEY)
 # Can also be set via the OLLAMA_HOST environment variable.
-OLLAMA_HOST = None
+OLLAMA_HOST = "http://127.0.0.1:11434"
+
+# qwen2.5vl:3b does not support Ollama tool-calling; use JSON-in-content instead.
+OLLAMA_USE_TOOLS = False
+
+# Downscale screenshots before Ollama vision (3b model ctx = 4096 tokens).
+OLLAMA_MAX_IMAGE_WIDTH = 560
 
 # ---------- Paths ----------
 BASE_DIR = Path(__file__).parent
+DATA_DIR = BASE_DIR / "data"
 DEBUG_DIR = BASE_DIR / "debug"
 SCREENSHOTS_DIR = BASE_DIR / "screenshots"
 SAVE_DEBUG_FRAMES = True  # keep frames + decisions in debug/ for review

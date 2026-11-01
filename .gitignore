@@ -7,6 +7,14 @@ location_coords.json
 matches_coords.json
 locations.json
 
+# Personal profile, preferences, and experiment history
+data/aryan_profile.yaml
+data/aryan_hinge_profile.json
+data/preferences.yaml
+data/experiments/
+modes/aryan_wingman.py
+voice/aryan_wingman.py
+
 # Calibration captures from interactive coord mapping
 _cal/
 

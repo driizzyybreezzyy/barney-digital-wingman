@@ -1,364 +1,421 @@
-<!-- Hero: CRT "HINGEAUTO" wordmark — see docs/assets/README.md for the image-gen prompt. -->
+# Digital Wingman
+
 <p align="center">
-  <img src="docs/assets/hingeauto-wordmark.png" alt="HingeAuto" width="680" />
+  <img src="docs/assets/hingeauto-wordmark.png" alt="Digital Wingman" width="680">
 </p>
 
 <p align="center">
-  <strong>LLM = Love Lookin' Model.</strong><br/>
-  A stitched-vision + LLM-judge loop that drives a real Hinge install on an Android emulator — it reads each profile, judges it against <em>your</em> rubric, and skips or likes with a personalized opener.
+  <strong>See the profile. Understand the person. Start a better conversation.</strong><br>
+  A human-in-the-loop, vision-powered dating profile analysis pipeline for thoughtful compatibility and specific conversation starters.
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-FF4FD8.svg"></a>
-  <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-FF4FD8?logo=python&logoColor=white">
-  <img alt="Judge: Claude or Ollama" src="https://img.shields.io/badge/judge-Claude%20%C2%B7%20Ollama-FF4FD8">
-  <img alt="Drives Android via ADB" src="https://img.shields.io/badge/emulator-Android%20%C2%B7%20ADB-FF4FD8">
-  <a href="#-read-this-first"><img alt="Violates Hinge ToS — use at your own risk" src="https://img.shields.io/badge/%E2%9A%A0-violates%20Hinge%20ToS-red"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-ff4fd8.svg"></a>
+  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab.svg?logo=python&logoColor=white">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-45%20passing-2ea44f.svg">
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Hinge%20%C2%B7%20Bumble%20%C2%B7%20Tinder%20%C2%B7%20Happn-8b5cf6.svg">
+  <img alt="Human in the loop" src="https://img.shields.io/badge/human--in--the--loop-required-f59e0b.svg">
 </p>
 
 <p align="center">
-  <a href="#-read-this-first">Read this first</a> ·
+  <a href="#why-digital-wingman">Why it exists</a> ·
+  <a href="#how-it-works">How it works</a> ·
   <a href="#quickstart">Quickstart</a> ·
-  <a href="#writing-your-own-mode">Modes</a> ·
-  <a href="#backends-anthropic-api-vs-ollama-free">Backends</a> ·
+  <a href="#use-it-with-any-dating-platform">Platforms</a> ·
   <a href="#architecture">Architecture</a> ·
-  <a href="LICENSE">License</a>
-</p>
-
-<p align="center">
-  <sub>brought to you by</sub><br/>
-  <a href="https://github.com/TerraByte-Dev"><img src="docs/assets/terrabyte-logo.png" alt="TerraByte Solutions LLC" width="84" /></a>
+  <a href="#roadmap">Roadmap</a>
 </p>
 
 ---
 
-HingeAuto is what you get when you point a vision-LLM at a phone screen and let
-it date for you. An Android emulator runs a real Hinge install; this repo drives
-it over ADB, judging every profile against a rubric **you** write and acting on
-the verdict — skip, or like with a personalized opener. It runs on **Claude** out
-of the box, or completely free on a local **Ollama** model. The fun part is the
-AI engineering — stitched-frame vision plus a forced structured decision; the
-swiping is just the demo.
+## Why Digital Wingman?
 
-## ⚠ Read this first
+Most dating tools optimize for volume: more swipes, more messages, more noise.
+Digital Wingman takes the opposite approach.
 
-**This project automates Hinge, which violates Hinge's Terms of Service.**
-Real risk of account ban with no appeal. Treat this as an educational toy
-for a single throwaway account, not a dating strategy.
+It helps you answer three better questions:
 
-- **One account only.** The shipped default `MAX_LIKES_PER_SESSION = 8`
-  matches free Hinge's daily like cap (resets at 4am local). One session
-  per day exhausts the free allotment.
-- **Get Hinge+ if you're going to use this seriously.** It removes the
-  daily like cap, and this repo is basically the most efficient way to
-  use the subscription — the bot does the liking for you, so you get full
-  value without ever opening the app. With Hinge+, bump
-  `MAX_LIKES_PER_SESSION` to 25–50 and run multiple sessions across the day.
-- **No warranty. No support.** Your account, your problem.
-- The repo exists because automating a stitched-vision + LLM-judge loop on
-  a phone UI is an interesting AI engineering exercise — not because anyone
-  thinks bot-swiping is good dating advice.
+1. **Is there a realistic compatibility signal here?**
+2. **What specific detail could lead to a natural conversation?**
+3. **Can I say something that sounds like me instead of an AI template?**
+
+The project combines multi-frame vision analysis, deterministic evidence
+merging, compatibility rules, hook extraction, opener generation, and a
+human approval step. It is designed as an AI engineering project and a
+personal experimentation framework, not as a replacement for judgment,
+consent, or authentic interaction.
+
+## Who is this for?
+
+Digital Wingman is a good fit if you are:
+
+- building with multimodal LLMs and want a practical vision pipeline;
+- interested in structured extraction from changing mobile UI screenshots;
+- experimenting with compatibility rubrics and conversational UX;
+- tired of generic openers and want specific, profile-grounded suggestions;
+- comfortable reviewing AI output before using it;
+- curious about building a reusable analysis layer across multiple apps.
+
+It is **not** a good fit if you want a blind auto-swiper, mass messaging bot,
+or a system that decides how to manipulate people. The default configuration
+is dry-run and human-approved.
 
 ## What it does
 
-Drives an Android emulator running Hinge through ADB. For each profile it
-scrolls top-to-bottom, screenshots the frames, asks Claude (or a local
-Ollama model) to judge against a user-defined rubric, and either taps Skip
-or taps the heart and types a personalized opener.
+Given one or more screenshots of a dating profile, Digital Wingman:
 
-<p align="center">
-  <img src="docs/assets/pipeline.png" alt="The HingeAuto loop: an emulator profile → stitched screenshot frames → an LLM judge → skip or like" width="100%" />
-</p>
-<p align="center">
-  <sub><b>The loop</b> — capture a profile across ~7 frames → stitch → an LLM judges it against your rubric → <b>skip</b>, or <b>like</b> with a written opener. The interesting part is the AI engineering; the swiping is just the demo.</sub>
-</p>
+1. extracts only visible profile evidence;
+2. merges repeated observations across frames;
+3. separates prompts, photos, interests, and basic information;
+4. scores profile effort and identifies conversation hooks;
+5. evaluates compatibility against your private profile and rubric;
+6. generates a small set of specific opener candidates;
+7. shows the recommendation for human review;
+8. optionally records feedback for later experiments.
 
-> ### 🤖 Tip: open this repo in Claude Code or Codex
->
-> This repo ships with [`AGENTS.md`](./AGENTS.md) (and [`CLAUDE.md`](./CLAUDE.md)).
-> If you cloned this and you're not sure where to start, open the directory
-> in Claude Code, Codex CLI, Cursor, or any agent that respects `AGENTS.md`
-> and say _"help me set this up."_ The agent will walk you through emulator
-> config, calibration, writing a rubric, and the first live run.
->
-> If you'd rather do it manually, read on.
+The reusable analysis pipeline works with saved screenshots from Hinge,
+Bumble, Tinder, Happn, or another dating platform. Hinge has an optional ADB
+capture/action adapter. Other platforms currently use manual screenshot import.
+
+## Safety and privacy first
+
+### Human approval is the default
+
+The project is configured for `dry_run` with human approval enabled. AI
+recommendations are suggestions, not instructions. You choose whether to
+send anything.
+
+### Keep personal data local
+
+Never commit:
+
+- `.env` files or API keys;
+- profile screenshots;
+- your private profile YAML;
+- self-profile scans;
+- experiment history;
+- match or conversation logs.
+
+The repository includes [`data/user_profile.example.yaml`](data/user_profile.example.yaml).
+Copy it to `data/aryan_profile.yaml` and customize it locally. Personal data
+paths are ignored by Git.
+
+### Respect people and platform rules
+
+Do not use the project to harass, spam, deceive, impersonate, pressure, or
+target people using sensitive traits. Follow the terms of every platform you
+use and applicable privacy law. Hinge ADB automation may violate Hinge's Terms
+of Service and can result in account restrictions. The safest supported
+workflow is screenshot analysis plus manual action.
+
+## How it works
+
+```text
+screenshots or optional Hinge capture
+                 |
+                 v
+       bounded frame collection
+                 |
+                 v
+      visible evidence extraction
+                 |
+                 v
+    duplicate-aware deterministic merge
+                 |
+                 v
+      conversation hook discovery
+                 |
+                 v
+      compatibility evaluation
+                 |
+                 v
+       opener candidates + reasons
+                 |
+                 v
+        human review and feedback
+```
+
+Capture is deliberately bounded. The default profile capture uses at most
+eight frames, keeps only changed frames, and stops after stable screens. This
+prevents unnecessary vision calls and makes offline debugging practical.
 
 ## Quickstart
 
-### 1. Set up Android Studio + a Pixel 10 emulator
+### Requirements
 
-If you've never used Android Studio, this is the longest step. Skip ahead
-if you already have an emulator running with `adb devices` showing it.
+- Python 3.10 or newer;
+- Git;
+- an LLM backend:
+  - Gemini API, or
+  - Anthropic API, or
+  - local/cloud Ollama;
+- Android SDK Platform Tools and an emulator only if using Hinge ADB capture;
+- screenshots or saved frames for offline multi-platform testing.
 
-1. Download Android Studio from <https://developer.android.com/studio>
-   (free, ~1 GB). During install, keep "Android SDK" and "Android Virtual
-   Device" checked — they bundle the `adb` CLI this repo needs.
-2. Open Android Studio. On the Welcome screen click **More Actions →
-   Virtual Device Manager** (or **Tools → Device Manager** if you've
-   already opened a project).
-3. Click **+ Create Device** (or the **+** icon).
-4. Under **Phone**, select **Pixel 10**. If your Android Studio version
-   doesn't list Pixel 10 yet, **Pixel 9** has the same 1080×2424 screen
-   and works identically. Click **Next**.
-5. Pick a system image. **API 34 (Android 14) with Google Play** is a good
-   default — Hinge installs cleanly from the Play Store on it. Download the
-   image if there's a download icon next to it (~1 GB, one-time). Click
-   **Next → Finish**.
-6. Back in Device Manager, click the **▶ play** arrow on the new device
-   row. First boot takes 2–5 minutes.
-7. In the emulator, open **Play Store**, sign in with a throwaway Google
-   account, search **Hinge**, install, open, finish onboarding (one account
-   only — see [Read this first](#-read-this-first)), navigate to the
-   **Discover** tab.
+### Install
 
-**Cold Boot when things get weird.** The emulator persists state via
-snapshots ("Quick Boot"), so a borked Hinge state or hung input can survive
-restarts. To wipe the snapshot: in Device Manager, click the **⋮** menu on
-the device row → **Cold Boot Now**. This is the emulator-equivalent of
-yanking the battery.
+```bash
+git clone <your-repository-url>
+cd digital-wingman
 
-**Confirm `adb` works.** From a fresh terminal:
-
-```
-adb devices
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
-You should see `emulator-5554   device` (or similar). If `adb` isn't on
-your PATH, find it under your Android SDK directory (on Windows:
-`%LOCALAPPDATA%\Android\Sdk\platform-tools\`; on Mac:
-`~/Library/Android/sdk/platform-tools/`) and add that to PATH.
+For Ollama:
 
-### 2. Install repo dependencies
-
-```
-git clone https://github.com/TerraByte-Dev/hinge-auto.git
-cd hinge-auto
-pip install -r requirements.txt
+```bash
+.venv/bin/python -m pip install -r requirements-ollama.txt
 ```
 
-### 3. Pick a judge backend
+### Configure the private profile
 
-```
+```bash
+cp data/user_profile.example.yaml data/aryan_profile.yaml
 cp .env.example .env
 ```
 
-Then either:
+Edit `data/aryan_profile.yaml` with your own goals, communication style,
+boundaries, and preferences. It is ignored by Git.
 
-- **Anthropic (default, best quality)** — open `.env` and add
-  `ANTHROPIC_API_KEY=sk-ant-...`. Get a key at
-  <https://console.anthropic.com>. Roughly $0.25/day at the free-tier cap.
-- **Ollama (free)** — see the [Backends](#backends-anthropic-api-vs-ollama-free)
-  section below. Lower decision quality, no per-token cost.
+Choose a backend in `.env` or `config.py`:
 
-### 4. Calibrate coordinates (probably skip)
-
-The shipped `config.COORDS` is tuned for a Pixel 10 emulator at 1080×2424.
-If that's what you set up, you can skip this step.
-
-For other devices or after a Hinge UI update, run:
-
-```
-python calibrate.py
+```env
+JUDGE_BACKEND=gemini
+GEMINI_API_KEY=your-key-here
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
-It saves `calibrate.png` to the repo root. Open it in any image viewer that
-shows cursor coordinates (Paint, IrfanView, Preview's inspector) and update
-the values in `config.COORDS` that don't match.
+For Anthropic:
 
-### 5. Pick a mode
-
-Three example modes ship in `modes/` (see [Writing your own mode](#writing-your-own-mode)).
-Set `ACTIVE_MODE` in `config.py` to the file's `NAME` field. The shipped
-`MAX_LIKES_PER_SESSION = 8` matches free Hinge's daily cap — leave it for
-your first run.
-
-### 6. Run
-
-With Hinge open on the Discover tab in the emulator:
-
-```
-python main.py
+```env
+JUDGE_BACKEND=anthropic
+ANTHROPIC_API_KEY=your-key-here
 ```
 
-Watch the first few decisions print live. If a decision or opener looks
-wrong: Ctrl-C, edit `PREFERENCES` in your mode file, re-run. With Hinge+,
-bump `MAX_LIKES_PER_SESSION` to 25–50 once decisions consistently match
-your rubric.
+For local Ollama, set `JUDGE_BACKEND=ollama`, install the optional dependency,
+start Ollama, and pull a vision model:
 
-> **Free tier?** Set `DRY_RUN = True` in `config.py` for the first run or
-> two. It runs the judge without spending likes (every would-like is
-> force-skipped instead), so your 8/day cap survives a rubric you haven't
-> tuned yet. With Hinge+ (unlimited likes), skip dry-run — small live
-> batches are a faster feedback loop.
-
-## Bonus: scan your own profile
-
-```
-python scan_self.py
+```bash
+ollama serve
+ollama pull qwen2.5-vl
 ```
 
-Taps through to your own profile's "View" tab (what other people see),
-captures the frames, sends them to Claude, and writes a Markdown report to
-`debug/self_scan_<timestamp>.md` with specific suggestions for photos,
-prompts, and the overall hook. Run it once a week.
+### Verify the installation
 
-This is the one thing in this repo that **doesn't violate Hinge's ToS** —
-no swiping, no messaging, just looking at your own content. Probably the
-most useful tool in the repo.
+```bash
+.venv/bin/python verify_setup.py
+```
 
-## Writing your own mode
+An ADB warning is expected when you are testing imported screenshots without
+a connected device.
 
-Three example rubrics ship in `modes/`:
+## Use it with any dating platform
 
-- `example_lenient.py` — default-LIKE, generic. Good starting point.
-- `example_strict.py` — default-SKIP, generic. The antonym.
-- `cougar.py` — themed: older age band (33–44) with playful young-buck
-  premades. Shows how to combine `AGE_MIN/MAX`, an inline `MESSAGE_VOICE`,
-  and themed `PREMADES`. The mode behind the framing that got the project
-  some attention. Run it with `python main.py --mode cougar --set-filters`
-  to also drive Hinge's in-app age slider.
+The platform label changes the analysis context only. It does not claim that
+the tool understands every private UI detail or automate every app.
 
-To write your own:
+### Saved screenshot analysis
 
-1. Copy `modes/template.py.example` to `modes/<your_name>.py`.
-2. Edit `PREFERENCES` to describe what should and shouldn't get a like.
-3. Optionally set `MESSAGE_VOICE` to one of the templates under `voice/`
-   (e.g. `"example_casual"` or `"example_polished"`), or paste a multi-line
-   rubric string directly into the field.
-4. Optionally populate `PREMADES` with verbatim openers Claude can pick from
-   instead of writing fresh copy.
-5. Point `ACTIVE_MODE` in `config.py` at the new file (use the value of its
-   `NAME` field, not the filename), or pass `--mode <your_name>` on the
-   command line.
+Put screenshots in a directory named `frame_00.png`, `frame_01.png`, and so
+on, then run:
 
-### Calibration (the optional extras)
+```bash
+.venv/bin/python wingman_session.py \
+  --frames-dir debug/profile_frames \
+  --platform bumble \
+  --no-approval
+```
 
-`python calibrate.py` (covered in [Quickstart](#4-calibrate-coordinates-probably-skip))
-handles the main coords. Two more calibration scripts are only needed if you
-use the corresponding optional features:
+Supported labels:
 
-- `python calibrate_filters.py` — Age slider thumb anchors. Needed for
-  `python main.py --set-filters`.
-- `python calibrate_matches.py` — Matches-tab tap target. Needed for
-  `python matches_scan.py`.
+```text
+generic  hinge  bumble  tinder  happn
+```
 
-The location picker (`locations.py`) needs a hand-rolled
-`location_coords.json`. A schema is at `location_coords.json.example` — copy
-it, rename, fill in pixel coords from a `calibrate.py` screenshot. (No
-interactive helper exists for this one yet; PRs welcome.)
+Examples:
+
+```bash
+# Tinder screenshots
+.venv/bin/python wingman_session.py \
+  --frames-dir samples/tinder_profile \
+  --platform tinder \
+  --no-approval
+
+# Happn screenshots
+.venv/bin/python wingman_session.py \
+  --frames-dir samples/happn_profile \
+  --platform happn \
+  --no-approval
+
+# Re-run from cached extraction data without another vision pass
+.venv/bin/python wingman_session.py \
+  --frames-dir debug/profile_frames \
+  --platform bumble \
+  --judge-only \
+  --no-approval
+```
+
+### Hinge capture
+
+Hinge capture requires:
+
+- Android Studio or another Android emulator;
+- Hinge installed in the emulator;
+- the app open on a profile;
+- `adb devices` showing exactly one connected device, unless
+  `config.ADB_SERIAL` is set locally;
+- calibrated coordinates for your screen.
+
+Start with a safe capture:
+
+```bash
+adb devices
+.venv/bin/python wingman_session.py --live-capture --single-frame
+```
+
+For full bounded capture:
+
+```bash
+.venv/bin/python wingman_session.py --live-capture --platform hinge
+```
+
+Non-Hinge live ADB capture is intentionally blocked until separate adapters
+are implemented and tested. Use screenshot import for those platforms.
+
+## Modes and personalization
+
+Modes live in [`modes/`](modes/). The repository includes generic examples:
+
+- [`example_lenient.py`](modes/example_lenient.py)
+- [`example_strict.py`](modes/example_strict.py)
+
+To create your own:
+
+```bash
+cp modes/example_strict.py modes/my_mode.py
+```
+
+Then set `ACTIVE_MODE = "my_mode"` in `config.py`.
+
+Voices live in [`voice/`](voice/). Use a voice name from your mode or provide
+a literal voice rubric. Keep your personal mode and voice ignored if they
+contain identity-specific information.
 
 ## Architecture
 
+| Component | Responsibility |
+|---|---|
+| [`wingman_session.py`](wingman_session.py) | CLI entry point and session orchestration |
+| [`wingman/capture.py`](wingman/capture.py) | Bounded screenshot capture and frame persistence |
+| [`wingman/profile_analyzer.py`](wingman/profile_analyzer.py) | Per-frame visible evidence extraction |
+| [`wingman/merge_frames.py`](wingman/merge_frames.py) | Deterministic duplicate-aware profile merge |
+| [`wingman/hooks.py`](wingman/hooks.py) | Conversation hook extraction and ranking |
+| [`wingman/compatibility.py`](wingman/compatibility.py) | Compatibility rubric and structured decision |
+| [`wingman/opener.py`](wingman/opener.py) | Grounded opener candidates and validation |
+| [`wingman/platforms.py`](wingman/platforms.py) | Supported platform labels and normalization |
+| [`wingman/pipeline.py`](wingman/pipeline.py) | Stage orchestration and checkpoint resume |
+| [`judge_*.py`](.) | LLM backend adapters |
+| [`tests/`](tests/) | Offline regression tests |
+
+Checkpoint artifacts are stored under a local debug directory and allow
+expensive stages to be resumed without repeating every model call.
+
+## Useful commands
+
+```bash
+# Run all tests
+.venv/bin/python -m pytest -q
+
+# Validate Python syntax
+.venv/bin/python -m compileall -q .
+
+# Inspect setup and optional backend connectivity
+.venv/bin/python verify_setup.py --check-backend
+
+# Generate a deterministic merged profile from cached frame JSON
+.venv/bin/python wingman_session.py \
+  --frames-dir debug/profile_frames \
+  --merge-only
+
+# Regenerate only openers from cached downstream checkpoints
+.venv/bin/python wingman_session.py \
+  --frames-dir debug/profile_frames \
+  --openers-only
 ```
-ADB capture  →  frame stitching  →  Claude judge  →  action
-   adb.py        config / main         judge.py       main.py
-                                       vision.py      adb.py
+
+## Troubleshooting
+
+### `No ADB device found`
+
+Start the emulator, enable USB debugging if using a phone, then run:
+
+```bash
+adb devices
 ```
 
-- **`adb.py`** wraps the `adb` CLI: screenshot, tap, swipe, type.
-- **`main.py`** is the loop. For each profile: scroll-to-top, capture N
-  frames, run them through the active backend's `judge()`, then either skip
-  or scroll back, tap the heart, type the opener, and tap Send Like.
-- **`judge_common.py`** holds the backend-agnostic pieces: system prompt
-  template, JSON tool schema, `Decision` dataclass, voice resolver, and the
-  `load_backend()` dispatcher.
-- **`judge.py`** is the Anthropic backend — Claude vision + forced tool
-  call. Caches the system prompt to keep cost down.
-- **`judge_ollama.py`** is the Ollama backend (Cloud or local).
-- **`vision.py`** finds UI elements whose absolute position shifts
-  per-profile (heart icon on photo 1, Send Like button, comment input).
-  Pixel-level detection, not OCR.
-- **`modes/`** holds rubric files. `config._apply_mode()` copies the active
-  mode's `PREFERENCES`, `AGE_MIN/MAX`, `MESSAGE_VOICE`, and `PREMADES` onto
-  the `config` module so the rest of the code reads them via `config.<name>`.
-- **`voice/`** holds opener-tone templates that modes can reference by name.
-- **`metrics.py`** appends one JSONL record per profile to
-  `debug/session_log.jsonl` for after-the-fact analysis.
-- **`filters.py` / `locations.py`** drive Hinge's in-app filter sheets
-  (age, neighborhood). Both need calibrated coord files.
-- **`matches_scan.py`** scrapes the Matches tab via a separate Claude vision
-  pass — for analytics, not for the swipe loop.
-- **`scan_self.py`** captures the user's own profile (via the "View" tab)
-  and asks Claude for improvement suggestions. The non-swiping feature of
-  the repo; nothing here violates Hinge ToS.
+If multiple devices appear, set `ADB_SERIAL` locally in `config.py`.
 
-## Safety and rate limits
+### Too many screenshots
 
-- `MAX_LIKES_PER_SESSION = 8` is the shipped default — matches free Hinge's
-  daily cap (resets 4am local). One session per day exhausts the free
-  allotment.
-- **Get Hinge+** if you're going to use this seriously. Without it the daily
-  cap makes the tool pointless. With it, the bot becomes the most efficient
-  way to use the subscription — you get the full like allotment without ever
-  opening the app. With Hinge+, raise the cap to 25–50 per session and
-  spread batches across the day. One giant batch tends to trip Hinge's
-  soft-throttle (empty Discover).
-- Don't change locations more than ~2 times per day. Frequent MyMove changes
-  get throttled.
-- One account. Don't run this on your real Hinge account.
-- Anthropic API spend at the free-tier cap is negligible (~$0.25/day on
-  Sonnet at 8 likes + skipped profiles). Watch the running totals printed
-  each loop if you raise the cap.
+Check `DISCOVER_PROFILE_MAX_FRAMES` and `SELF_PROFILE_MAX_FRAMES` in
+`config.py`. The default capture stops after stable frames and stores only
+changed frames. Use `--single-frame` to validate the rest of the pipeline
+without scrolling.
 
-## Backends: Anthropic API vs Ollama (free)
+### Ollama returns malformed JSON
 
-The judge pipeline ships with two interchangeable backends. Pick via
-`JUDGE_BACKEND` in `config.py`. Both backends share the same system prompt,
-schema, and `Decision` shape (in `judge_common.py`) — only the API call
-differs.
+Try a smaller frame set first:
 
-### `"anthropic"` (default, recommended)
+```bash
+.venv/bin/python wingman_session.py \
+  --frames-dir debug/profile_frames \
+  --platform generic \
+  --single-frame \
+  --no-approval
+```
 
-Uses Claude with vision + forced tool calling. Best quality decisions and
-best opener writing. Roughly **$0.02–$0.05 per profile** on Sonnet at medium
-effort.
+Then compare the saved checkpoint output. Larger vision models generally
+handle structured extraction better than very small models.
 
-Setup:
-1. `pip install -r requirements.txt`
-2. Put `ANTHROPIC_API_KEY=...` in `.env`.
-3. Leave `JUDGE_BACKEND = "anthropic"` in `config.py`.
+### Missing private profile
 
-### `"ollama"` (free — Ollama Cloud or local)
+Copy the template:
 
-Uses an open-weight vision model through Ollama. **No per-token cost** on the
-free tier of Ollama Cloud, or fully local on your own GPU.
+```bash
+cp data/user_profile.example.yaml data/aryan_profile.yaml
+```
 
-Setup:
-1. Install the extra dep:
-   ```
-   pip install -r requirements.txt
-   pip install -r requirements-ollama.txt
-   ```
-2. Either:
-   - **Ollama Cloud** — sign up at <https://ollama.com>, create an API key,
-     set `OLLAMA_API_KEY=...` in your `.env`, and set
-     `OLLAMA_HOST = "https://ollama.com"` in `config.py`.
-   - **Local Ollama** — install Ollama, `ollama pull qwen2.5-vl`, run
-     `ollama serve`. Leave `OLLAMA_HOST = None` (defaults to
-     `http://localhost:11434`).
-3. Set `JUDGE_BACKEND = "ollama"` in `config.py`.
+Then edit it locally. Do not commit the copied file.
 
-Honest tradeoffs:
-- **Decision quality** on a 7-screenshot judgment is meaningfully worse than
-  Sonnet — expect more wrong skips on good profiles and more generic openers.
-- **Tool-calling reliability** varies by model. `qwen2.5-vl` is the best of
-  the open-weight options as of this writing. If you see `RuntimeError:
-  Ollama (...) did not return a usable submit_decision call`, try a larger
-  variant (`qwen2.5-vl:32b`) or switch to `llama3.2-vision`.
-- The `matches_scan.py` analytics scrape still uses Anthropic — it's a
-  separate tool, not the swipe loop, and the swap there isn't wired up.
+## Roadmap
+
+- [x] Human-in-the-loop analysis pipeline
+- [x] Bounded, duplicate-aware frame capture
+- [x] Deterministic multi-frame merging
+- [x] Compatibility and opener stages
+- [x] Offline screenshot import
+- [x] Platform labels for Hinge, Bumble, Tinder, and Happn
+- [ ] Improve Ollama structured-output reliability
+- [ ] Add anonymized cross-platform screenshot fixtures
+- [ ] Add platform-specific extraction hints without coupling the core pipeline
+- [ ] Add dedicated, opt-in capture adapters with clear safety gates
+- [ ] Add experiment reports for reply and conversation outcomes
+
+## Contributing
+
+Small, focused pull requests are welcome. Before opening one:
+
+1. do not include screenshots, API keys, private profile data, or chat logs;
+2. add or update an offline test;
+3. run `pytest`, `compileall`, and `git diff --check`;
+4. describe which platform and backend you tested;
+5. document any behavior change.
 
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
 
-## Contributing
-
-This is a personal project published as-is. PRs that strip more PII, fix
-calibration on additional devices, or add a real `calibrate_locations.py`
-are welcome. PRs that improve evasion of Hinge's bot-detection are not.
-
-<p align="center">
-  <a href="https://github.com/TerraByte-Dev"><img src="docs/assets/terrabyte-logo.png" alt="TerraByte Solutions LLC" width="64" /></a><br/>
-  <sub>An open-source project by <strong>TerraByte Solutions LLC</strong></sub>
-</p>
+This project is for educational and experimental use. You are responsible for
+your account, your data, your messages, and compliance with applicable
+platform terms.

@@ -27,8 +27,11 @@ Set in your .env (or shell):
 """
 
 import base64
+import io
 import json
 import os
+
+from PIL import Image
 
 import config
 from judge_common import (
@@ -75,6 +78,26 @@ def _images_b64(frames: list[bytes]) -> list[str]:
     return [base64.standard_b64encode(f).decode("utf-8") for f in frames]
 
 
+def _prepare_frames(frames: list[bytes]) -> list[bytes]:
+    """Downscale frames so small-context vision models can fit prompt + image."""
+    max_w = getattr(config, "OLLAMA_MAX_IMAGE_WIDTH", 560)
+    if not max_w:
+        return frames
+    prepared: list[bytes] = []
+    for png in frames:
+        img = Image.open(io.BytesIO(png))
+        if img.width > max_w:
+            ratio = max_w / img.width
+            img = img.resize(
+                (max_w, max(1, int(img.height * ratio))),
+                Image.Resampling.LANCZOS,
+            )
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, format="PNG", optimize=True)
+        prepared.append(buf.getvalue())
+    return prepared
+
+
 def _decision_from_args(args: dict, usage: dict) -> Decision:
     """Build Decision from a tool-call argument dict, tolerating mild
     schema drift (open models miss keys more often than Claude)."""
@@ -98,40 +121,25 @@ def _decision_from_args(args: dict, usage: dict) -> Decision:
     return Decision(**merged, usage=usage)
 
 
-def judge(frames: list[bytes]) -> Decision:
-    """Given an ordered list of PNG frames of one profile, return a Decision."""
-    client = _client()
-    model = getattr(config, "OLLAMA_MODEL", "qwen2.5-vl")
-
-    user_text = (
-        f"Above are {len(frames)} screenshots of one Hinge profile, in order "
-        "from top to bottom. Decide whether to like or skip, and call the "
-        "submit_decision tool with the structured result."
-    )
-
-    response = client.chat(
-        model=model,
-        messages=[
-            {"role": "system", "content": build_system_prompt()},
-            {
-                "role": "user",
-                "content": user_text,
-                "images": _images_b64(frames),
-            },
-        ],
-        tools=[_tool_spec()],
-        # Hint Ollama toward JSON if it falls back to content output
-        # instead of a tool call.
-        options={"temperature": 0.2},
-    )
-
-    usage = {
+def _usage_from_response(response) -> dict:
+    return {
         "input_tokens": getattr(response, "prompt_eval_count", 0) or 0,
         "output_tokens": getattr(response, "eval_count", 0) or 0,
         "cache_creation_input_tokens": 0,
         "cache_read_input_tokens": 0,
     }
 
+
+def _message_content(response) -> str:
+    message = response.get("message") if isinstance(response, dict) else response.message
+    return (
+        message.get("content") if isinstance(message, dict)
+        else getattr(message, "content", "")
+    ) or ""
+
+
+def _decision_from_response(response) -> Decision | None:
+    usage = _usage_from_response(response)
     message = response.get("message") if isinstance(response, dict) else response.message
     tool_calls = (
         message.get("tool_calls") if isinstance(message, dict)
@@ -153,13 +161,8 @@ def judge(frames: list[bytes]) -> Decision:
         enforce_premade_verbatim(decision)
         return decision
 
-    # Fallback: some models return JSON in `content` instead of a tool call
-    content = (
-        message.get("content") if isinstance(message, dict)
-        else getattr(message, "content", "")
-    ) or ""
+    content = _message_content(response)
     if content:
-        # Strip code fences / leading prose
         start = content.find("{")
         end = content.rfind("}")
         if start >= 0 and end > start:
@@ -170,9 +173,83 @@ def judge(frames: list[bytes]) -> Decision:
                 return decision
             except json.JSONDecodeError:
                 pass
+    return None
+
+
+_JSON_SUFFIX = """
+
+Respond with ONLY one JSON object and no other text. Required keys:
+name, decision, confidence, reasoning, message, skip_reason,
+message_archetype, premade_id, prompt_referenced.
+
+decision must be "like" or "skip".
+confidence must be "low", "medium", or "high".
+skip_reason must be "none", "age", "preferences", "low_effort", or "other".
+message_archetype must be one of: empty, observation_question, prompt_callback,
+photo_callback, tease, premade, other.
+Use empty strings where appropriate. Plain ASCII in message."""
+
+
+def _chat_json(client, model: str, frames: list[bytes], user_text: str):
+    return client.chat(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": build_system_prompt().strip() + _JSON_SUFFIX,
+            },
+            {
+                "role": "user",
+                "content": user_text,
+                "images": _images_b64(_prepare_frames(frames)),
+            },
+        ],
+        format="json",
+        options={"temperature": 0.2},
+    )
+
+
+def judge(frames: list[bytes]) -> Decision:
+    """Given an ordered list of PNG frames of one profile, return a Decision."""
+    client = _client()
+    model = getattr(config, "OLLAMA_MODEL", "qwen2.5-vl")
+    use_tools = getattr(config, "OLLAMA_USE_TOOLS", True)
+
+    user_text = (
+        f"Above are {len(frames)} screenshots of one Hinge profile, in order "
+        "from top to bottom. Decide whether to like or skip."
+    )
+    if use_tools:
+        user_text += " Call the submit_decision tool with the structured result."
+
+    response = None
+    if use_tools:
+        try:
+            response = client.chat(
+                model=model,
+                messages=[
+                    {"role": "system", "content": build_system_prompt()},
+                    {
+                        "role": "user",
+                        "content": user_text,
+                        "images": _images_b64(_prepare_frames(frames)),
+                    },
+                ],
+                tools=[_tool_spec()],
+                options={"temperature": 0.2},
+            )
+        except Exception as e:
+            if "does not support tools" not in str(e):
+                raise
+            response = _chat_json(client, model, frames, user_text)
+    else:
+        response = _chat_json(client, model, frames, user_text)
+
+    decision = _decision_from_response(response)
+    if decision is not None:
+        return decision
 
     raise RuntimeError(
-        f"Ollama ({model}) did not return a usable submit_decision call. "
-        f"Try a different OLLAMA_MODEL (e.g. 'qwen2.5-vl:7b' or "
-        f"'llama3.2-vision:11b') or check that the model is pulled."
+        f"Ollama ({model}) did not return a usable decision. "
+        f"Try OLLAMA_USE_TOOLS=False or a different OLLAMA_MODEL."
     )
