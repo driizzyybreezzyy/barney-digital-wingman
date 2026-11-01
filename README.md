@@ -1,7 +1,7 @@
-# Digital Wingman
+# Barney — Digital Wingman
 
 <p align="center">
-  <img src="docs/assets/hingeauto-wordmark.png" alt="Digital Wingman" width="680">
+  <img src="docs/assets/hingeauto-wordmark.png" alt="Barney — Digital Wingman" width="680">
 </p>
 
 <p align="center">
@@ -159,7 +159,7 @@ debug captures. Those fixtures are excluded from GitHub for privacy.
 
 ```bash
 git clone <your-repository-url>
-cd digital-wingman
+cd barney-digital-wingman
 
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
