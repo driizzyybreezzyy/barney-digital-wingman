@@ -12,7 +12,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-ff4fd8.svg"></a>
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab.svg?logo=python&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-45%20passing-2ea44f.svg">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-45%20collected-2ea44f.svg">
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-Hinge%20%C2%B7%20Bumble%20%C2%B7%20Tinder%20%C2%B7%20Happn-8b5cf6.svg">
   <img alt="Human in the loop" src="https://img.shields.io/badge/human--in--the--loop-required-f59e0b.svg">
 </p>
@@ -139,6 +139,9 @@ Capture is deliberately bounded. The default profile capture uses at most
 eight frames, keeps only changed frames, and stops after stable screens. This
 prevents unnecessary vision calls and makes offline debugging practical.
 
+The public test suite intentionally skips tests that require private local
+debug captures. Those fixtures are excluded from GitHub for privacy.
+
 ## Quickstart
 
 ### Requirements
@@ -159,8 +162,11 @@ git clone <your-repository-url>
 cd digital-wingman
 
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install -r requirements-dev.txt
 ```
+
+`requirements-dev.txt` installs the runtime dependencies plus the test runner.
+If you only need to run the application, use `requirements.txt` instead.
 
 For Ollama:
 
@@ -408,7 +414,7 @@ Small, focused pull requests are welcome. Before opening one:
 
 1. do not include screenshots, API keys, private profile data, or chat logs;
 2. add or update an offline test;
-3. run `pytest`, `compileall`, and `git diff --check`;
+3. install from `requirements-dev.txt`, then run `pytest`, `compileall`, and `git diff --check`;
 4. describe which platform and backend you tested;
 5. document any behavior change.
 
